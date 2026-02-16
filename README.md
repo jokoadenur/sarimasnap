@@ -124,7 +124,7 @@ Joko Ade Nursiyono (East Java Data Analyst, BPS-Statistics Indonesia)
 
 ## Citation
 If you use sarimasnap in research or official reports, please cite:
-`
+```r
 Nursiyono, J. A. (2026). sarimasnap: Automatic Seasonal ARIMA Modeling with Diagnostic Filtering in R.
-`
+```
 
