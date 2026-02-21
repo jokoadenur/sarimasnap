@@ -4,13 +4,15 @@
 \alias{sarimasnap}
 \title{SARIMASNAP: Automatic SARIMA with Grid Search and Diagnostics}
 \usage{
-sarimasnap(df, h = 10)
+sarimasnap(df, h = 10, plot = TRUE)
 }
 \arguments{
 \item{df}{A numeric time series object (ts) or a data frame
 containing at least one numeric column.}
 
 \item{h}{Integer. Forecast horizon. Default is 10.}
+
+\item{plot}{Logical. If TRUE (default), produces model and diagnostic plots.}
 }
 \value{
 An invisible list containing:

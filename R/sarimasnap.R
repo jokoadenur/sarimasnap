@@ -6,6 +6,7 @@
 #' @param df A numeric time series object (ts) or a data frame
 #' containing at least one numeric column.
 #' @param h Integer. Forecast horizon. Default is 10.
+#' @param plot Logical. If TRUE (default), produces model and diagnostic plots.
 #'
 #' @details
 #' The procedure includes:
@@ -34,9 +35,15 @@
 #'
 #' @seealso
 #' stats::arima
+#' @importFrom stats Box.test acf as.formula coef embed
+#' @importFrom stats frequency is.ts ks.test lm pacf
+#' @importFrom stats pchisq pnorm pt residuals sd
+#' @importFrom graphics abline layout legend lines par polygon
+#' @importFrom grDevices rgb
+#' @importFrom utils head
 #'
 #' @export
-sarimasnap <- function(df, h = 10) {
+sarimasnap <- function(df, h = 10, plot = TRUE) {
 
   cat("\n============================================================\n")
   cat("     SARIMASNAP - Automatic SARIMA with Machine Learning    \n")
@@ -466,7 +473,7 @@ sarimasnap <- function(df, h = 10) {
   # ==========================================================
   # 6. VISUALISASI (IMPROVED FLEXIBLE Y-AXIS)
   # ==========================================================
-
+  if (plot){
   layout(matrix(c(1,1,2,3), 2, 2, byrow=TRUE),
          heights = c(2, 1))
   par(mar=c(4,4,3,2))
@@ -542,6 +549,7 @@ sarimasnap <- function(df, h = 10) {
 
   acf(resids, main="Residual ACF")
   pacf(resids, main="Residual PACF")
+  }
 
   cat("\n----------- OVERFITTING AND UNDERFITTING TEST -------------\n")
 
