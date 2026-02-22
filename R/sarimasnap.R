@@ -81,10 +81,85 @@ sarimasnap <- function(df, h = 10, plot = TRUE) {
   test_y  <- y[(split_point+1):n]
 
   # ==========================================================
+  # AUTO DIFFERENCING BASED ON ADF (TRAIN DATA ONLY)
+  # ==========================================================
+
+  cat("\n----------- AUTO DIFFERENCING (ADF - TRAIN) ---------------\n")
+
+  y_diff <- train_y
+  d_auto <- 0
+  max_diff <- 2
+
+  repeat{
+
+    dy <- diff(y_diff)
+
+    if(length(dy) < 10){
+      break
+    }
+
+    max_lag_adf <- floor(sqrt(length(dy)))
+    if(max_lag_adf < 1) max_lag_adf <- 1
+
+    dy_lag_matrix <- embed(dy, max_lag_adf+1)
+
+    dy_dep  <- dy_lag_matrix[,1]
+    dy_lags <- dy_lag_matrix[,-1,drop=FALSE]
+    y_lag2  <- y_diff[(length(y_diff)-length(dy_dep)):(length(y_diff)-1)]
+
+    adf_df <- data.frame(
+      dy_dep = dy_dep,
+      y_lag  = y_lag2,
+      dy_lags
+    )
+
+    colnames(adf_df) <- c("dy","y_lag",
+                          paste0("dy_lag",1:max_lag_adf))
+
+    adf_formula <- as.formula(
+      paste("dy ~ y_lag +",
+            paste(paste0("dy_lag",1:max_lag_adf),
+                  collapse="+"))
+    )
+
+    adf_model <- tryCatch({
+      lm(adf_formula, data=adf_df)
+    }, error=function(e) NULL)
+
+    if(is.null(adf_model)) break
+
+    t_stat_adf <- coef(summary(adf_model))["y_lag","t value"]
+    df_res_adf <- adf_model$df.residual
+
+    adf_p <- 2 * pt(abs(t_stat_adf),
+                    df=df_res_adf,
+                    lower.tail=FALSE)
+
+    cat(sprintf("d = %d | ADF p-value = %.5f\n",
+                d_auto, adf_p))
+
+    if(adf_p < 0.05){
+      cat("Stationary achieved!\n")
+      break
+    }
+
+    if(d_auto >= max_diff){
+      cat("Max differencing reached.\n")
+      break
+    }
+
+    y_diff <- diff(y_diff)
+    d_auto <- d_auto + 1
+  }
+
+  cat("Selected d =", d_auto, "\n")
+  cat("------------------------------------------------------------\n")
+
+  # ==========================================================
   # 3. GRID SEARCH + TRAIN DIAGNOSTIC
   # ==========================================================
 
-  grid <- expand.grid(p=0:3, d=0:1, q=0:3,
+  grid <- expand.grid(p=0:3, d=d_auto, q=0:3,
                       P=0:1, D=0:1, Q=0:1)
 
   results_list <- list()
@@ -146,89 +221,6 @@ sarimasnap <- function(df, h = 10, plot = TRUE) {
   cat("\n---------------- TOP 10 MODEL CANDIDATES ------------------\n")
   print(top10)
   cat("------------------------------------------------------------\n")
-
-  cat("\n-------------------- STATIONARITY TEST --------------------\n")
-
-  # ----------------------------------------------------------
-  # DICKEY-FULLER (DF) TEST (no lag)
-  # dY_t = alpha + beta * y_{t-1} + e_t
-  # H0 : beta = 0 (unit root)
-  # ----------------------------------------------------------
-
-  dy  <- diff(y)
-  y_lag <- y[-length(y)]
-
-  df_model <- tryCatch({
-    lm(dy ~ y_lag)
-  }, error=function(e) NULL)
-
-  if(!is.null(df_model)){
-
-    beta_hat <- coef(summary(df_model))["y_lag","Estimate"]
-    t_stat   <- coef(summary(df_model))["y_lag","t value"]
-    df_res   <- df_model$df.residual
-
-    df_p <- 2 * pt(abs(t_stat), df=df_res, lower.tail=FALSE)
-
-    cat("Dickey-Fuller t-stat  :", round(t_stat,4), "\n")
-    cat("Dickey-Fuller p-value :", round(df_p,5), "\n")
-
-  } else {
-    df_p <- NA
-    cat("Dickey-Fuller test failed\n")
-  }
-
-  # ----------------------------------------------------------
-  # AUGMENTED DICKEY-FULLER (ADF)
-  # dY_t = alpha + beta * y_{t-1} + sum(gamma_i * dY_{t-i}) + e_t
-  # ----------------------------------------------------------
-
-  max_lag_adf <- floor(sqrt(length(dy)))  # rule of thumb
-
-  if(max_lag_adf < 1) max_lag_adf <- 1
-
-  dy_lag_matrix <- embed(dy, max_lag_adf+1)
-
-  dy_dep  <- dy_lag_matrix[,1]
-  dy_lags <- dy_lag_matrix[,-1,drop=FALSE]
-  y_lag2  <- y[(length(y)-length(dy_dep)):(length(y)-1)]
-
-  adf_df <- data.frame(
-    dy_dep = dy_dep,
-    y_lag  = y_lag2,
-    dy_lags
-  )
-
-  colnames(adf_df) <- c("dy","y_lag",
-                        paste0("dy_lag",1:max_lag_adf))
-
-  adf_formula <- as.formula(
-    paste("dy ~ y_lag +",
-          paste(paste0("dy_lag",1:max_lag_adf),
-                collapse="+"))
-  )
-
-  adf_model <- tryCatch({
-    lm(adf_formula, data=adf_df)
-  }, error=function(e) NULL)
-
-  if(!is.null(adf_model)){
-
-    t_stat_adf <- coef(summary(adf_model))["y_lag","t value"]
-    df_res_adf <- adf_model$df.residual
-
-    adf_p <- 2 * pt(abs(t_stat_adf),
-                    df=df_res_adf,
-                    lower.tail=FALSE)
-
-    cat("ADF t-stat           :", round(t_stat_adf,4), "\n")
-    cat("ADF p-value          :", round(adf_p,5), "\n")
-
-  } else {
-    adf_p <- NA
-    cat("ADF test failed\n")
-  }
-
   # ----------------------------------------------------------
   # INTERPRETATION
   # ----------------------------------------------------------
@@ -313,7 +305,8 @@ sarimasnap <- function(df, h = 10, plot = TRUE) {
       s_period, "]\n")
   cat("------------------------------------------------------------\n")
 
-  cat("\n----------------- DIFFERENCING ANALYSIS --------------------\n")
+  cat("Differencing chosen via ADF on TRAIN data\n")
+  cat("Non-seasonal differencing (d) :", d_auto, "\n")
 
   d_val <- best_order$ord[2]
   D_val <- best_order$seas[2]
@@ -329,22 +322,6 @@ sarimasnap <- function(df, h = 10, plot = TRUE) {
   if(d_val == 0 & D_val == 0){
     cat("Model selected without differencing.\n")
   }
-
-  # Konsistensi dengan ADF
-  if(!is.na(stationary_flag)){
-
-    if(stationary_flag == FALSE & (d_val>0 | D_val>0)){
-      cat("Model differencing consistent with non-stationary series.\n")
-    }
-
-    if(stationary_flag == TRUE & d_val==0 & D_val==0){
-      cat("Model consistent with stationary series.\n")
-    }
-  }
-
-  cat("------------------------------------------------------------\n")
-
-
   # ==========================================================
   # 5. PARAMETER ESTIMATION
   # ==========================================================
@@ -474,81 +451,81 @@ sarimasnap <- function(df, h = 10, plot = TRUE) {
   # 6. VISUALISASI (IMPROVED FLEXIBLE Y-AXIS)
   # ==========================================================
   if (plot){
-  layout(matrix(c(1,1,2,3), 2, 2, byrow=TRUE),
-         heights = c(2, 1))
-  par(mar=c(4,4,3,2))
+    layout(matrix(c(1,1,2,3), 2, 2, byrow=TRUE),
+           heights = c(2, 1))
+    par(mar=c(4,4,3,2))
 
-  z_val_ci <- 1.96
-  upper_ci <- fc_future$pred + z_val_ci * fc_future$se
-  lower_ci <- fc_future$pred - z_val_ci * fc_future$se
+    z_val_ci <- 1.96
+    upper_ci <- fc_future$pred + z_val_ci * fc_future$se
+    lower_ci <- fc_future$pred - z_val_ci * fc_future$se
 
-  # --- AUTO Y RANGE DETECTION (MORE FLEXIBLE)
-  y_all <- c(y,
-             fitted_val,
-             fc_future$pred,
-             upper_ci,
-             lower_ci)
+    # --- AUTO Y RANGE DETECTION (MORE FLEXIBLE)
+    y_all <- c(y,
+               fitted_val,
+               fc_future$pred,
+               upper_ci,
+               lower_ci)
 
-  y_min <- min(y_all, na.rm=TRUE)
-  y_max <- max(y_all, na.rm=TRUE)
+    y_min <- min(y_all, na.rm=TRUE)
+    y_max <- max(y_all, na.rm=TRUE)
 
-  # Tambahkan padding 5% dari range
-  padding <- 0.05 * (y_max - y_min)
+    # Tambahkan padding 5% dari range
+    padding <- 0.05 * (y_max - y_min)
 
-  y_lim_final <- c(y_min - padding,
-                   y_max + padding)
+    y_lim_final <- c(y_min - padding,
+                     y_max + padding)
 
-  plot(1:n, y, type="l", col="gray60",
-       main=paste0("automlR SARIMA(",
-                   paste(best_order$ord,collapse=","),")(",
-                   paste(best_order$seas,collapse=","),")[",
-                   s_period,"]"),
-       xlab="Time Index",
-       ylab=target_name,
-       ylim=y_lim_final)
+    plot(1:n, y, type="l", col="gray60",
+         main=paste0("automlR SARIMA(",
+                     paste(best_order$ord,collapse=","),")(",
+                     paste(best_order$seas,collapse=","),")[",
+                     s_period,"]"),
+         xlab="Time Index",
+         ylab=target_name,
+         ylim=y_lim_final)
 
-  lines(1:split_point,
-        fitted_val[1:split_point],
-        col="blue", lwd=2)
+    lines(1:split_point,
+          fitted_val[1:split_point],
+          col="blue", lwd=2)
 
-  lines((split_point+1):n,
-        fitted_val[(split_point+1):n],
-        col="red", lwd=2)
+    lines((split_point+1):n,
+          fitted_val[(split_point+1):n],
+          col="red", lwd=2)
 
-  lines((n+1):(n+h),
-        fc_future$pred,
-        col="orange", lwd=2)
+    lines((n+1):(n+h),
+          fc_future$pred,
+          col="orange", lwd=2)
 
-  polygon(c((n+1):(n+h),
-            rev((n+1):(n+h))),
-          c(upper_ci,
-            rev(lower_ci)),
-          col=rgb(1,0.6,0,0.2),
-          border=NA)
+    polygon(c((n+1):(n+h),
+              rev((n+1):(n+h))),
+            c(upper_ci,
+              rev(lower_ci)),
+            col=rgb(1,0.6,0,0.2),
+            border=NA)
 
-  lines((n+1):(n+h), upper_ci,
-        col="darkorange", lty=2)
+    lines((n+1):(n+h), upper_ci,
+          col="darkorange", lty=2)
 
-  lines((n+1):(n+h), lower_ci,
-        col="darkorange", lty=2)
+    lines((n+1):(n+h), lower_ci,
+          col="darkorange", lty=2)
 
-  abline(v=c(split_point,n), lty=3)
+    abline(v=c(split_point,n), lty=3)
 
-  legend("bottom",
-         legend=c("Actual","Train Fit","Test Fit",
-                  "Forecast","95% CI"),
-         col=c("gray60","blue","red",
-               "orange","darkorange"),
-         lty=c(1,1,1,1,2),
-         lwd=c(1,2,2,2,1),
-         horiz=TRUE,
-         bty="n",
-         xpd=NA,
-         inset=c(0,0.02),
-         cex=0.7)
+    legend("bottom",
+           legend=c("Actual","Train Fit","Test Fit",
+                    "Forecast","95% CI"),
+           col=c("gray60","blue","red",
+                 "orange","darkorange"),
+           lty=c(1,1,1,1,2),
+           lwd=c(1,2,2,2,1),
+           horiz=TRUE,
+           bty="n",
+           xpd=NA,
+           inset=c(0,0.02),
+           cex=0.7)
 
-  acf(resids, main="Residual ACF")
-  pacf(resids, main="Residual PACF")
+    acf(resids, main="Residual ACF")
+    pacf(resids, main="Residual PACF")
   }
 
   cat("\n----------- OVERFITTING AND UNDERFITTING TEST -------------\n")
